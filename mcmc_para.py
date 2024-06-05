@@ -1,13 +1,18 @@
+import warnings
+warnings.filterwarnings('ignore')
+
+import os
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
 from multiprocessing import Pool
 from functools import partial
 from time import sleep
 from tqdm import tqdm
 import numpy as np
 import astropy.units as u
-from ashmcmc import ashmcmc, interp_emis_temp
+from demcmc_FIP.ashmcmc import ashmcmc, interp_emis_temp
 import argparse
 import platform
-from demcmc import (
+from demcmc_FIP.demcmc import (
     EmissionLine,
     TempBins,
     load_cont_funcs,
@@ -15,9 +20,9 @@ from demcmc import (
     predict_dem_emcee,
     ContFuncDiscrete,
 )
-from demcmc.units import u_temp, u_dem
-from mcmc.mcmc_utils import calc_chi2, mcmc_process
-
+from demcmc_FIP.demcmc.units import u_temp, u_dem
+from demcmc_FIP.mcmc.mcmc_utils import calc_chi2, mcmc_process
+import configparser
 
 def check_dem_exists(filename: str) -> bool:
     # Check if the DEM file exists
@@ -79,7 +84,20 @@ def process_pixel(args: tuple[int, np.ndarray, np.ndarray, list[str], np.ndarray
 
 def download_data(filename: str) -> None:
     from eispac.download import download_hdf5_data
-    download_hdf5_data(filename.split('/')[-1], local_top='SO_EIS_data', overwrite=False)
+
+    config_obj = configparser.ConfigParser()
+    config_obj.read("demcmc_FIP/configfile.ini")
+    directories = config_obj["directories"]
+    data_dir = directories['data_dir']
+
+#    if platform.system() == 'Linux':
+##        local_top=f'/home/staff/daithil/work/Data/EIS'
+#        local_top=f'/disk/solar14/dml/Data/EIS'
+#
+#    if platform.system() == 'Darwin':
+#        local_top=f'/Users/dml/Data/EIS'
+
+    download_hdf5_data(filename.split('/')[-1], local_top=data_dir, overwrite=False)
 
 def combine_dem_files(xdim:int, ydim:int, dir: str) -> np.array:
     from glob import glob
@@ -108,7 +126,7 @@ def process_data(filename: str, num_processes: int) -> None:
     a = ashmcmc(filename)
 
     # Retrieve necessary data from ashmcmc object
-    Lines, Intensity, Int_error = a.fit_data(plot=False)
+    Lines, Intensity, Int_error = a.fit_data(plot=True)
     ldens = a.read_density()
 
     # Generate a list of arguments for process_pixel function
@@ -169,7 +187,7 @@ def calc_composition(filename, np_file, line_databases, num_processes):
         # Read the intensity maps for the composition lines
         for num, fip_line in enumerate(line_databases[comp_ratio][:2]):
             print('getting intensity \n')
-            map = a.ash.get_intensity(fip_line, outdir=a.outdir, plot=False, calib=True)
+            map = a.ash.get_intensity(fip_line, outdir=a.outdir, plot=True, calib=True)
             intensities[:, :, num] = map.data
 
         # Create argument list for parallel processing
@@ -190,100 +208,15 @@ def calc_composition(filename, np_file, line_databases, num_processes):
         map_fip = Map(composition, map.meta)
         map_fip = correct_metadata(map_fip, comp_ratio)
         map_fip.save(f'{a.outdir}/{a.outdir.split("/")[-1]}_{comp_ratio}.fits', overwrite=True)
-# def calc_composition(filename, np_file, line_database):
-#     # I am tired and am probably very dumb in calculating this
-#     from sunpy.map import Map
-#     a = ashmcmc(filename)
-
-#     ldens = a.read_density()
-#     dem_data = np.load(np_file)
-#     dem_median = dem_data['dem_combined']
-
-#     # Retrieve necessary data from ashmcmc object
-#     for comp_ratio in line_databases:
-#         intensities = np.zeros((ldens.shape[0], ldens.shape[1], 2))
-#         composition = np.zeros_like(ldens)  # Initialize composition array
-
-#         for num, fip_line in enumerate(line_databases[comp_ratio][:2]):  # Iterate only over the first 2 lines
-#             map = a.ash.get_intensity(fip_line, outdir=a.outdir, plot=False)
-#             intensities[:, :, num] = map.data
-
-#         print(f'------------------------------Calculating {line_databases[comp_ratio][2]} FIP Bias------------------------------')
-#         for ypix, xpix in tqdm(np.ndindex(ldens.shape)):  # Iterate over each pixel
-#             logt, emis, linenames = a.read_emissivity(ldens[ypix, xpix]) # Read emissivity from .sav files
-#             logt_interp = interp_emis_temp(logt.value) # Interpolate the temperature
-#             temp_bins = TempBins(logt_interp * u.K) # Create temp_bin structure for intensity prediction
-#             emis_sorted = a.emis_filter(emis, linenames, line_databases[comp_ratio][:2]) # Filter emissivity based on specified lines
-#             dem_pixel = dem_median[ypix, xpix,:] # Extract DEM for the pixel
-#             int_lf = pred_intensity_compact(emis_sorted[0], logt_interp, line_databases[comp_ratio][0], dem_pixel)
-#             dem_scaled = dem_pixel * (intensities[ypix, xpix, 0] / int_lf)
-#             int_hf = pred_intensity_compact(emis_sorted[1], logt_interp, line_databases[comp_ratio][1], dem_scaled)
-#             fip_ratio = int_hf/intensities[ypix, xpix, 1]
-#             composition[ypix, xpix] = fip_ratio  # Update composition matrix
-
-#         np.savez(f'{a.outdir}/{a.outdir.split("/")[-1]}_composition_{comp_ratio}.npz', composition=composition, chi2 =  dem_data['chi2_combined'], no_lines = dem_data['lines_used'])
-
-#         # Create SunPy Map with appropriate metadata
-#         map_fip = Map(composition, map.meta)
-#         map_fip = correct_metadata(map_fip, comp_ratio)
-#         map_fip.save(f'{a.outdir}/{a.outdir.split("/")[-1]}_{comp_ratio}.fits')
-
-# def calc_composition(filename, np_file, line_database):
-#     from sunpy.map import Map
-#     from multiprocessing import Pool
-#     import platform
-
-#     a = ashmcmc(filename)
-
-#     ldens = a.read_density()
-#     dem_data = np.load(np_file)
-#     dem_median = dem_data['dem_combined']
-
-#     # Retrieve necessary data from ashmcmc object
-#     for comp_ratio in line_databases:
-#         intensities = np.zeros((ldens.shape[0], ldens.shape[1], 2))
-#         composition = np.zeros_like(ldens)  # Initialize composition array
-
-#         for num, fip_line in enumerate(line_databases[comp_ratio][:2]):  # Iterate only over the first 2 lines
-#             map = a.ash.get_intensity(fip_line, outdir=a.outdir, plot=False)
-#             intensities[:, :, num] = map.data
-
-#         def calc_composition_pixel(ypix, xpix):
-#             logt, emis, linenames = a.read_emissivity(ldens[ypix, xpix]) # Read emissivity from .sav files
-#             logt_interp = interp_emis_temp(logt.value) # Interpolate the temperature
-#             temp_bins = TempBins(logt_interp * u.K) # Create temp_bin structure for intensity prediction
-#             emis_sorted = a.emis_filter(emis, linenames, line_databases[comp_ratio][:2]) # Filter emissivity based on specified lines
-
-#             int_lf = pred_intensity_compact(emis_sorted[0], logt_interp, line_databases[comp_ratio][0], dem_median[ypix, xpix])
-#             dem_scaled = dem_median[ypix, xpix] * (intensities[ypix, xpix, 0] / int_lf)
-#             int_hf = pred_intensity_compact(emis_sorted[1], logt_interp, line_databases[comp_ratio][1], dem_scaled)
-#             fip_ratio = int_hf/intensities[ypix, xpix, 1]
-#             return fip_ratio
-
-#         # Determine the operating system type (Linux or macOS)
-#         # Set the number of processes based on the operating system
-#         if platform.system() == "Linux": process_num = 60 # above 64 seems to break the MSSL machine
-#         elif platform.system() == "Darwin": process_num = 10
-#         else: process_num = 10 
-
-#         with Pool(processes=process_num) as pool:
-#             results = list(tqdm(pool.starmap(calc_composition_pixel, [(ypix, xpix) for ypix, xpix in np.ndindex(ldens.shape)]), total=ldens.size, desc="Processing Pixels"))
-#             composition = np.array(results).reshape(ldens.shape)
-
-#         np.savez(f'{a.outdir}/{a.outdir}_composition_{comp_ratio}.npz', composition=composition, chi2 =  dem_data['chi2_combined'], no_lines = dem_data['lines_used'])
-
-#         # Create SunPy Map with appropriate metadata
-#         map_fip = Map(composition, map.meta)
-#         map_fip = correct_metadata(map_fip, comp_ratio)
-#         map_fip.save(f'{a.outdir}/{a.outdir}_{comp_ratio}.fits')
+        a.ash.plot_fip_map(a.outdir.split("/")[-1], map_fip, a.outdir)
 
 import os
 
 def update_filenames_txt(old_filename, new_filename):
-    with open("config.txt", "r") as file:
+    with open("demcmc_FIP/filelist.txt", "r") as file:
         lines = file.readlines()
 
-    with open("config.txt", "w") as file:
+    with open("demcmc_FIP/filelist.txt", "w") as file:
         for line in lines:
             if line.strip() == old_filename:
                 file.write(new_filename + "\n")
@@ -294,11 +227,11 @@ if __name__ == "__main__":
     # Determine the operating system type (Linux or macOS)
     # Set the default number of cores based on the operating system
     if platform.system() == "Linux":
-        default_cores = 60  # above 64 seems to break the MSSL machine - probably due to no. cores = 64?
+        default_cores = len(os.sched_getaffinity(0))  # above 64 seems to break the MSSL machine - probably due to no. cores = 64?
     elif platform.system() == "Darwin":
-        default_cores = 10
+        default_cores = 8
     else:
-        default_cores = 10
+        default_cores = len(os.sched_getaffinity(0))
 
     # Create an argument parser
     parser = argparse.ArgumentParser(description='Process data using multiprocessing.')
@@ -307,21 +240,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Read filenames from a text file
-    with open("config.txt", "r") as file:
+    with open("demcmc_FIP/filelist.txt", "r") as file:
         filenames = [line.strip() for line in file]
 
     for file_num, filename_full in enumerate(filenames):
         filename = filename_full.replace(" [processing]", '')
         # Check if the file has already been processed
 
-        # Re-read the config.txt file to get the latest information
-        with open("config.txt", "r") as file:
+        # Re-read the filelist.txt file to get the latest information
+        with open("demcmc_FIP/filelist.txt", "r") as file:
             current_filenames = [line.strip() for line in file]
 
         filename_full = current_filenames[file_num]
         if not filename_full.endswith("[processed]") and not filename_full.endswith("[processing]"):
             # try:
-            # Add "[processing]" to the end of the filename in filenames.txt
+            # Add "[processing]" to the end of the filename in filelist.txt
             processing_filename = filename + " [processing]"
             update_filenames_txt(filename_full, processing_filename)
             print(f"Processing: {filename}")
@@ -329,11 +262,11 @@ if __name__ == "__main__":
             print(f"Processed: {filename}")
             line_databases = {
                 "sis": ['si_10_258.37', 's_10_264.23', 'SiX_SX'],
-                "CaAr": ['ca_14_193.87', 'ar_14_194.40', 'CaXIV_ArXIV'],
+#                "CaAr": ['ca_14_193.87', 'ar_14_194.40', 'CaXIV_ArXIV'],
             }
             calc_composition(filename, np_file, line_databases, args.cores)
 
-            # Change "[processing]" to "[processed]" in filenames.txt after processing is finished
+            # Change "[processing]" to "[processed]" in filelist.txt after processing is finished
             processed_filename = filename + " [processed]"
             update_filenames_txt(processing_filename, processed_filename)
 

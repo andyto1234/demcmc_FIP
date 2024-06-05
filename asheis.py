@@ -10,8 +10,9 @@ from datetime import datetime
 # from alpha_code import alpha, alpha_map
 import platform
 from astropy.visualization import ImageNormalize, quantity_support
-from eis_calibration.eis_calib_2014 import calib_2014
-from eis_calibration.eis_calib_2023 import calib_2023
+from demcmc_FIP.eis_calibration.eis_calib_2014 import calib_2014
+from demcmc_FIP.eis_calibration.eis_calib_2023 import calib_2023
+import configparser
 
 def load_plotting_routine():
     fig = plt.figure()
@@ -68,10 +69,18 @@ class asheis:
         }
         self.ncpu = ncpu
         self.rebin = rebin
-        if platform.system() == "Linux":
-            self.dens_dir = '/disk/solar17/st3/density'
-        elif platform.system() == "Darwin":
-            self.dens_dir = '/Users/andysh.to/Script/idl_code/density'
+
+        config_obj = configparser.ConfigParser()
+        config_obj.read("demcmc_FIP/configfile.ini")
+        directories = config_obj["directories"]
+        main_dir = directories['main_dir']
+        self.dens_dir = main_dir+'density'
+
+#        if platform.system() == "Linux":
+##            self.dens_dir = '/home/staff/daithil/work/python_output/FIP/density'
+#            self.dens_dir = '/disk/solar2/dml/python/FIP/density'
+#        elif platform.system() == "Darwin":
+#            self.dens_dir = '/Users/dml/python_output/FIP/density'
 
 
     def check_window(self, line):
@@ -88,7 +97,7 @@ class asheis:
         if template_name != 'fe_13_203_826.2c.template.h5':
             template = eispac.read_template(eispac.data.get_fit_template_filepath(template_name))
         else:
-            template = eispac.read_template('eis_density/fe_13_203_830.3c.template.h5')
+            template = eispac.read_template('demcmc_FIP/eis_density/fe_13_203_830.3c.template.h5')
             template_name = 'fe_13_203_830.3c.template.h5'
 
         path = Path(f'{self.filename}'.replace("data.h5",template_name).replace(".template",f"-{self.dict[f'{line}'][1]}.fit"))
@@ -121,7 +130,7 @@ class asheis:
         amap.save(f"{outdir}/images/{amap.measurement.lower().split()[-1]}/{line}/eis_{date}_{'_'.join(amap.measurement.lower().split())}.fits", overwrite=True)
         return date
     
-    def plot_map(self, date, amap, line, outdir, colorbar=False, savefig=True, **kwargs):
+    def plot_int_map(self, date, amap, line, outdir, colorbar=False, savefig=True, **kwargs):
         load_plotting_routine()
         amap.plot(**kwargs)
         if colorbar==True: plt.colorbar() 
@@ -130,14 +139,26 @@ class asheis:
         if savefig==True: plt.savefig(f'{outdir}/images/{amap.measurement.lower().split()[-1]}/{line}/eis_{date}_{amap.measurement.lower().replace(" ","_").replace(".","_")}.png')
         # plt.savefig(f'images/{amap.measurement.lower().split()[-1]}/eis_{date}_{amap.measurement.lower().replace(" ","_").replace(".","_")}.png')
 
+    def plot_fip_map(self, date, amap, outdir, colorbar=True, savefig=True):
+        load_plotting_routine()
+
+        norm = colors.Normalize(vmin=0, vmax=4)
+        amap.plot_settings['norm'] = norm
+        amap.plot_settings['cmap'] = 'RdYlBu'
+        amap.plot()
+
+        if colorbar==True: plt.colorbar() 
+        load_axes_labels()
+        if savefig==True: plt.savefig(f'{outdir}/images/{date}_{amap.measurement.lower().replace(" ","_").replace(".","_")}.png')
+
     def get_intensity(self, line, outdir='', refit=False, plot=True, mcmc=False, calib=True):
         fit_res = self.fit_data(line,'int',refit, outdir) # Get fitdata
         m = fit_res.get_map(self.dict[f'{line}'][1],measurement='intensity') # From fitdata get map
         if calib: # Calibrate data using NRL calibration (Warren et al. 2014)
-            m, calib_ratio = calib_2023(m, ratio=True)
-            print(f'---------------------Calibrated using Del Zanna et al. 2023; Ratio: {calib_ratio}---------------------')
+            m, calib_ratio = calib_2014(m, ratio=True)
+            print(f'---------------------Calibrated using Warren et al. 2014; Ratio: {calib_ratio}---------------------')
         date = self.directory_setup(m,line,outdir) # Creating directories
-        if plot == True: self.plot_map(date, m, line, outdir) # Plot maps
+        if plot == True: self.plot_int_map(date, m, line, outdir) # Plot maps
         if mcmc:
             if calib:
                 m_error = fit_res.fit['err_int'][:,:,self.dict[f'{line}'][1]]*calib_ratio
@@ -152,14 +173,14 @@ class asheis:
         m = fit_res.get_map(component = self.dict[f'{line}'][1],measurement='velocity')
         date = self.directory_setup(m,line,outdir)
         m.plot_settings['norm'] = ImageNormalize(vmin=vmin,vmax=vmax) # adjusting the velocity saturation
-        if plot == True: self.plot_map(date, m, line, colorbar=True)
+        if plot == True: self.plot_int_map(date, m, line, colorbar=True)
         return m
         
     def get_width(self, line, outdir='', refit=False, plot=True):
         fit_res = self.fit_data(line,'vel', outdir)
         m = fit_res.get_map(component = self.dict[f'{line}'][1],measurement='width')
         date = self.directory_setup(m,line)
-        if plot == True: self.plot_map(date, m, line, colorbar=True)
+        if plot == True: self.plot_int_map(date, m, line, colorbar=True)
         return m
     
     def get_density(self, outdir='', refit=False, plot=True, mcmc=False, **kwargs):
@@ -168,8 +189,8 @@ class asheis:
         from astropy.visualization import ImageNormalize
         import astropy.units as u
 
-        density_ratios = readsav(f'{self.dens_dir}/density_ratios_fe_13_203_82_202_04_.sav')['smooth_rat']
-        density_values = readsav(f'{self.dens_dir}/density_ratios_fe_13_203_82_202_04_.sav')['smooth_den']
+        density_ratios = readsav(f'{self.dens_dir}/density_ratios_fe_13_203_82_202_04_from_IDL.sav')['smooth_rat']
+        density_values = readsav(f'{self.dens_dir}/density_ratios_fe_13_203_82_202_04_from_IDL.sav')['smooth_den']
 
         m_nom = self.get_intensity('fe_13_203.83', outdir, plot=False, **kwargs)
         m_denom = self.get_intensity('fe_13_202.04', outdir, plot=False, **kwargs)
@@ -225,7 +246,7 @@ class asheis:
         date = self.directory_setup(m_fip, lines[2])
         
         # m_fip.save(f"images/{m_fip.measurement.lower().split()[-1]}/{lines[2]}/eis_{date}_{'_'.join(m_fip.measurement.lower().split())}.fits", overwrite=True)
-        self.plot_map(date, m_fip, lines[2], outdir, vmin=vmin, vmax=vmax, norm=colors.Normalize(), cmap='CMRmap')
+        self.plot_fip_map(date, m_fip, outdir, vmin=vmin, vmax=vmax, norm=colors.Normalize(), cmap='CMRmap')
         
 if __name__ == '__main__':
     load_plotting_routine()

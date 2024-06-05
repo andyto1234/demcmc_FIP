@@ -1,0 +1,3 @@
+/home/staff/daithil/work/Data/EIS/eis_20071017_024748.data.h5
+/Users/dml/Data/EIS/eis_20071017_024748.data.h5 [processing]
+/disk/solar14/dml/Data/EIS/eis_20071017_024748.data.h5 [processing]

@@ -1,1 +1,3 @@
-SO_EIS_data/eis_20230327_061218.data.h5
+/home/staff/daithil/work/Data/EIS/eis_20071017_024748.data.h5 [processing]
+/Users/dml/Data/EIS/eis_20071017_024748.data.h5 [processing]
+/disk/solar14/dml/Data/EIS/eis_20071017_024748.data.h5

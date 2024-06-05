@@ -1,17 +1,25 @@
-from asheis import asheis
+from demcmc_FIP.asheis import asheis
 from multiprocessing import Pool
 import os
 import re
 import numpy as np
+import configparser
 
 def find_matching_file(log_density, abund_file = 'emissivities_sun_photospheric_2015_scott'):
     import platform
 
-    if platform.system() == 'Linux':
-        directory=f'/disk/solar17/st3/{abund_file}/'
+    config_obj = configparser.ConfigParser()
+    config_obj.read("demcmc_FIP/configfile.ini")
+    directories = config_obj["directories"]
+    main_dir = directories['main_dir']
+    directory = main_dir+abund_file+'/'
 
-    if platform.system() == 'Darwin':
-        directory=f'/Users/andysh.to/Script/Data/{abund_file}/'
+#    if platform.system() == 'Linux':
+##        directory=f'/home/staff/daithil/work/python_output/FIP/{abund_file}/'
+#        directory=f'/disk/solar2/dml/python/FIP/{abund_file}/'
+#
+#    if platform.system() == 'Darwin':
+#        directory=f'/Users/dml/python_output/FIP/{abund_file}/'
 
     # Convert log_density to float
     target_log_density = float(log_density)
